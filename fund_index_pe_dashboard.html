@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>沪深300基金&指数&PE仪表板</title>
+    <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: hsl(0, 0%, 20%);
+        }
+        .chart-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .chart-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        #fundChart, #indexChart, #peChart {
+            width: 100%;
+            height: 400px;
+        }
+        #backtestResults {
+            display: none;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .result-item {
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+        }
+        .result-label {
+            font-size: 14px;
+            color: #666;
+        }
+        .result-value {
+            font-size: 18px;
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .positive {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+        }
+        .negative {
+            background-color: #ffebee;
+            color: #c62828;
+        }
+        button {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #1565c0;
+        }
+        button:disabled {
+            background-color: #bdbdbd;
+            cursor: not-allowed;
+        }
+        #loadingIndicator {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #1976d2;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 滑杆样式 */
+        input[type="range"] {
+            cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #1976d2;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #1976d2;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: #ddd;
+            height: 6px;
+            border-radius: 3px;
+        }
+        
+        input[type="range"]::-moz-range-track {
+            background: #ddd;
+            height: 6px;
+            border-radius: 3px;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>沪深300基金&指数&PE仪表板</h1>
+        
+        <!-- 添加PE阈值设置输入框 -->
+        <div style="background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px;">
+            <h2 style="margin-top: 0; color: #333;">策略参数设置</h2>
+            <div style="margin-bottom: 15px;">
+                <label for="dataTypeSelector" style="display: block; margin-bottom: 10px; font-weight: bold;">选择数据类型：</label>
+                <select id="dataTypeSelector" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 200px; font-size: 14px;" onchange="changeDataType()">
+                    <option value="">加载中...</option>
+                </select>
+            </div>
+            <div id="dataRangeInfo" style="padding: 10px; background-color: #e3f2fd; border-left: 4px solid #1976d2; margin-bottom: 15px; border-radius: 4px; color: #1565c0;">
+                <strong>📊 数据范围信息：</strong><br>
+                <span id="dataRangeText">正在加载数据...</span>
+            </div>
+            <div style="display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-start;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label for="buyThreshold" style="display: block; margin-bottom: 10px; font-weight: bold;">
+                        买入PE分位点阈值: <span id="buyThresholdValue" style="color: #2ca02c; font-size: 18px;">40</span>%
+                    </label>
+                    <input type="range" id="buyThreshold" min="0" max="100" step="1" value="40" 
+                           style="width: 100%; height: 6px; border-radius: 3px; background: #ddd; outline: none; cursor: pointer;"
+                           oninput="updateBuyThresholdDisplay()">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
+                        <span>0%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 250px;">
+                    <label for="sellThreshold" style="display: block; margin-bottom: 10px; font-weight: bold;">
+                        卖出PE分位点阈值: <span id="sellThresholdValue" style="color: #d62728; font-size: 18px;">60</span>%
+                    </label>
+                    <input type="range" id="sellThreshold" min="0" max="100" step="1" value="60" 
+                           style="width: 100%; height: 6px; border-radius: 3px; background: #ddd; outline: none; cursor: pointer;"
+                           oninput="updateSellThresholdDisplay()">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
+                        <span>0%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 250px;">
+                    <label for="endDatePicker" style="display: block; margin-bottom: 10px; font-weight: bold;">回测结束日期：</label>
+                    <input type="date" id="endDatePicker" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 100%;">
+                </div>
+            </div>
+        </div>
+        
+        <div id="backtestResults">
+            <h2>回测结果</h2>
+            <div class="result-grid">
+                <div class="result-item">
+                    <div class="result-label">起始日期</div>
+                    <div class="result-value" id="startDate">-</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">结束日期</div>
+                    <div class="result-value" id="endDate">-</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">基金收益率</div>
+                    <div class="result-value" id="fundReturn">-</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">指数收益率</div>
+                    <div class="result-value" id="indexReturn">-</div>
+                </div>
+                <div class="result-item">
+                    <div class="result-label">超额收益</div>
+                    <div class="result-value" id="excessReturn">-</div>
+                </div>
+            </div>
+            <div style="margin-top: 15px;">
+                <button onclick="hideBacktestResults()">关闭结果</button>
+                <button onclick="showTradeDetails()" style="margin-left: 10px;">查看投资详情</button>
+            </div>
+        </div>
+        
+        <!-- 投资详情模态框 -->
+        <div id="tradeDetailsModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000;">
+            <div style="background-color: white; margin: 5% auto; padding: 20px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); max-width: 800px; max-height: 80vh; overflow-y: auto;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h2 style="margin: 0;">投资详情</h2>
+                    <button onclick="closeTradeDetails()" style="background: #dc3545; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">×</button>
+                </div>
+                <div id="tradeDetailsContent"></div>
+            </div>
+        </div>
+        
+        <div id="loadingIndicator">
+            <div class="spinner"></div>
+            <p>正在进行回测...</p>
+        </div>
+        
+        <div class="chart-container">
+            <div class="chart-title" id="chartTitle">加载中...</div>
+            <div id="fundChart"></div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let availableDataTypes = [];
+        let currentDataType = '沪深300';
+        let fundData = [];
+        let peData = [];
+        let mergedData = [];
+        
+        // 图表实例
+        let fundChart = null;
+        
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', async function() {
+            await initializeDataTypeSelector();
+            await loadData();
+            initializeDatePicker();
+            createCharts();
+            updateBuyThresholdDisplay();
+            updateSellThresholdDisplay();
+        });
+        
+        // 更新买入阈值显示
+        function updateBuyThresholdDisplay() {
+            const value = document.getElementById('buyThreshold').value;
+            document.getElementById('buyThresholdValue').textContent = value;
+        }
+        
+        // 更新卖出阈值显示
+        function updateSellThresholdDisplay() {
+            const value = document.getElementById('sellThreshold').value;
+            document.getElementById('sellThresholdValue').textContent = value;
+        }
+        
+        // 获取所有可用的数据类型文件夹
+        async function loadAvailableDataTypes() {
+            try {
+                const knownTypes = ['沪深300', '白酒'];
+                const availableTypes = [];
+                
+                for (const type of knownTypes) {
+                    try {
+                        const response = await fetch(`ETFData/${type}/price.csv`);
+                        if (response.ok) {
+                            availableTypes.push(type);
+                        }
+                    } catch (e) {
+                        // 文件不存在
+                    }
+                }
+                
+                if (availableTypes.length === 0) {
+                    availableTypes.push('沪深300');
+                }
+                
+                return availableTypes;
+            } catch (e) {
+                console.error('加载数据类型失败:', e);
+                return ['沪深300'];
+            }
+        }
+        
+        // 初始化数据类型选择器
+        async function initializeDataTypeSelector() {
+            availableDataTypes = await loadAvailableDataTypes();
+            const selector = document.getElementById('dataTypeSelector');
+            selector.innerHTML = '';
+            
+            availableDataTypes.forEach(type => {
+                const option = document.createElement('option');
+                option.value = type;
+                option.textContent = type;
+                if (type === '沪深300') {
+                    option.selected = true;
+                }
+                selector.appendChild(option);
+            });
+            
+            currentDataType = '沪深300';
+        }
+        
+        // 切换数据类型
+        async function changeDataType() {
+            const selector = document.getElementById('dataTypeSelector');
+            currentDataType = selector.value;
+            await loadData();
+            createCharts();
+            initializeDatePicker();
+        }
+        
+        // 初始化日期选择器
+        function initializeDatePicker() {
+            const datePicker = document.getElementById('endDatePicker');
+            // 设置默认结束日期为合并数据集的最后一天
+            if (mergedData && mergedData.length > 0) {
+                const lastDate = mergedData[mergedData.length - 1].date;
+                const firstDate = mergedData[0].date;
+                datePicker.min = firstDate;
+                datePicker.max = lastDate;
+                datePicker.value = lastDate;
+            }
+        }
+        
+        // 加载数据
+        async function loadData() {
+            try {
+                // 根据当前选择的数据类型加载数据
+                let fundFilePath, peFilePath;
+                
+                // 统一使用新的目录结构
+                fundFilePath = `ETFData/${currentDataType}/price.csv`;
+                peFilePath = `ETFData/${currentDataType}/pe.csv`;
+                
+                // 从CSV文件加载基金数据
+                const responseFund = await fetch(fundFilePath);
+                const textFund = await responseFund.text();
+                const linesFund = textFund.split('\n').filter(line => line.trim() !== '');
+                
+                fundData = linesFund.slice(1).map(line => {
+                    const parts = line.split(',');
+                    if (parts.length >= 2 && parts[0].trim()) {
+                        const date = parts[0].trim();
+                        const value = parseFloat(parts[1].trim().replace('=', ''));
+                        if (!isNaN(value)) {
+                            return { date, close: value };
+                        }
+                    }
+                    return null;
+                }).filter(item => item);
+                
+                // 从CSV文件加载PE数据
+                const responsePe = await fetch(peFilePath);
+                const textPe = await responsePe.text();
+                const linesPe = textPe.split('\n').filter(line => line.trim() !== '');
+                const headersPe = linesPe[0].split(',').map(h => h.trim());
+                
+                peData = linesPe.slice(1).map(line => {
+                    const parts = line.split(',');
+                    if (parts.length >= headersPe.length) {
+                        const dateIndex = headersPe.findIndex(h => h.includes('日期'));
+                        const peIndex = headersPe.findIndex(h => h.includes('PE'));
+                        
+                        if (dateIndex >= 0 && peIndex >= 0) {
+                            const date = parts[dateIndex].trim();
+                            const pe = parseFloat(parts[peIndex].trim().replace('=', ''));
+                            
+                            if (!isNaN(pe)) {
+                                return { date, pe };
+                            }
+                        }
+                    }
+                    return null;
+                }).filter(item => item);
+                
+                // 计算每条PE记录的真实分位点（基于整个历史数据）
+                if (peData.length > 0) {
+                    const peValues = peData.map(d => d.pe).sort((a, b) => a - b);
+                    peData.forEach(record => {
+                        const lowerCount = peValues.filter(v => v <= record.pe).length;
+                        record.percentile = ((lowerCount - 1) / (peValues.length - 1)) * 100;
+                    });
+                    const latestPE = peData[peData.length - 1];
+                    console.log(`PE分位点动态计算成功: ${latestPE.date} PE=${latestPE.pe.toFixed(4)} 分位点=${latestPE.percentile.toFixed(2)}%`);
+                }
+                
+                // 合并数据：以PE和基金数据为基础
+                mergedData = peData.map(peItem => {
+                    const fundItem = fundData.find(fund => fund.date === peItem.date);
+                    
+                    if (fundItem) {
+                        return {
+                            date: peItem.date,
+                            pe: peItem.pe,
+                            percentile: peItem.percentile,
+                            fundClose: fundItem.close
+                        };
+                    }
+                    return null;
+                }).filter(item => item && item.pe && item.fundClose);
+                
+                // 按日期排序（从早到晚）
+                mergedData.sort((a, b) => {
+                    if (a.date < b.date) return -1;
+                    if (a.date > b.date) return 1;
+                    return 0;
+                });
+                
+                console.log('数据加载完成', {
+                    dataType: currentDataType,
+                    fundData: fundData.length,
+                    peData: peData.length,
+                    mergedData: mergedData.length
+                });
+                
+                // 更新UI中的数据范围显示
+                if (fundData.length > 0 && peData.length > 0 && mergedData.length > 0) {
+                    const fundDates = fundData.map(d => d.date).sort();
+                    const peDates = peData.map(d => d.date).sort();
+                    const mergedDates = mergedData.map(d => d.date).sort();
+                    
+                    let rangeText = `
+                        <strong>✓ 数据类型: ${currentDataType}</strong><br>
+                        <strong>✓ 可用于回测的日期范围: ${mergedDates[0]} 至 ${mergedDates[mergedDates.length - 1]}</strong><br>
+                        <small style="color: #666;">
+                            • 基金数据: ${fundDates[0]} 至 ${fundDates[fundDates.length - 1]}<br>
+                            • PE数据: ${peDates[0]} 至 ${peDates[peDates.length - 1]}
+                        </small>
+                    `;
+                    document.getElementById('dataRangeText').innerHTML = rangeText;
+                }
+            } catch (error) {
+                console.error('数据加载失败:', error);
+                alert('数据加载失败：' + error.message);
+            }
+        }
+        
+        // 创建图表
+        function createCharts() {
+            // 检查数据是否已加载
+            if (!fundData || fundData.length === 0 || 
+                !mergedData || mergedData.length === 0) {
+                console.error('数据尚未加载完成');
+                setTimeout(createCharts, 1000);
+                return;
+            }
+            
+            // 更新图表标题
+            document.getElementById('chartTitle').textContent = `${currentDataType} 基金净值 & PE-TTM估值（双纵坐标）`;
+            
+            // 基金净值图表 (线图，因为基金只有收盘价)
+            const fundTrace = {
+                x: fundData.map(d => d.date),
+                y: fundData.map(d => d.close),
+                type: 'scatter',
+                mode: 'lines',
+                name: '基金净值',
+                line: { color: '#1f77b4' },
+                text: fundData.map(d => {
+                    const mergedItem = mergedData.find(item => item.date === d.date);
+                    let peInfo = '';
+                    if (mergedItem && mergedItem.pe) {
+                        peInfo += `<br>PE: ${mergedItem.pe.toFixed(2)}`;
+                        if (mergedItem.percentile !== null) {
+                            peInfo += `<br>PE分位点: ${mergedItem.percentile.toFixed(2)}%`;
+                        }
+                    }
+                    return `<b>${d.date}</b><br>净值: ${d.close.toFixed(4)}${peInfo}`;
+                }),
+                hovertemplate: '%{text}<extra></extra>'
+            };
+            
+            // 添加PE线到基金图表（使用右侧纵坐标轴）
+            const fundPETrace = {
+                x: mergedData.map(d => d.date),
+                y: mergedData.map(d => d.pe),
+                type: 'scatter',
+                mode: 'lines',
+                name: 'PE-TTM',
+                line: { color: '#2ca02c', width: 2 },
+                yaxis: 'y2',
+                text: mergedData.map(d => 
+                    `<b>${d.date}</b><br>PE-TTM: ${d.pe.toFixed(2)}<br>分位点: ${d.percentile ? d.percentile.toFixed(2) : '无'}%`
+                ),
+                hovertemplate: '%{text}<extra></extra>'
+            };
+
+            // 计算基金图表的PE分位数（用于参考线）
+            const fundPEValues = mergedData.map(d => d.pe).filter(val => val);
+            const fundPE20Percentile = calculatePercentile(fundPEValues, 20);
+            const fundPE50Percentile = calculatePercentile(fundPEValues, 50);
+            const fundPE80Percentile = calculatePercentile(fundPEValues, 80);
+            
+            const fundPE20Line = {
+                x: [mergedData[0].date, mergedData[mergedData.length - 1].date],
+                y: [fundPE20Percentile, fundPE20Percentile],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'PE 20%分位',
+                line: { dash: 'dash', color: 'lightgreen', width: 1 },
+                yaxis: 'y2'
+            };
+            
+            const fundPE50Line = {
+                x: [mergedData[0].date, mergedData[mergedData.length - 1].date],
+                y: [fundPE50Percentile, fundPE50Percentile],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'PE 50%分位',
+                line: { dash: 'dash', color: 'gray', width: 1 },
+                yaxis: 'y2'
+            };
+            
+            const fundPE80Line = {
+                x: [mergedData[0].date, mergedData[mergedData.length - 1].date],
+                y: [fundPE80Percentile, fundPE80Percentile],
+                mode: 'lines',
+                type: 'scatter',
+                name: 'PE 80%分位',
+                line: { dash: 'dash', color: 'orange', width: 1 },
+                yaxis: 'y2'
+            };
+
+            const fundLayout = {
+                title: '易方达沪深300ETF联接A基金净值 & PE-TTM估值（双纵坐标）',
+                xaxis: { 
+                    title: '日期',
+                    showspikes: true,
+                    spikemode: 'across',
+                    spikesnap: 'cursor',
+                    showline: true,
+                    showgrid: true
+                },
+                yaxis: { 
+                    title: '基金净值',
+                    titlefont: { color: '#1f77b4' },
+                    tickfont: { color: '#1f77b4' },
+                    showspikes: true,
+                    spikemode: 'across',
+                    spikesnap: 'cursor',
+                    showline: true,
+                    showgrid: true
+                },
+                yaxis2: {
+                    title: 'PE-TTM',
+                    titlefont: { color: '#2ca02c' },
+                    tickfont: { color: '#2ca02c' },
+                    overlaying: 'y',
+                    side: 'right'
+                },
+                hovermode: 'x unified',
+                spikedistance: -1,
+                xaxis_showspikes: true,
+                yaxis_showspikes: true,
+                legend: {
+                    x: 0.01,
+                    y: 0.99,
+                    bgcolor: 'rgba(255,255,255,0.8)',
+                    bordercolor: 'rgba(0,0,0,0.2)',
+                    borderwidth: 1
+                }
+            };
+            
+            Plotly.newPlot('fundChart', [fundTrace, fundPETrace, fundPE20Line, fundPE50Line, fundPE80Line], fundLayout);
+            
+            // 为基金图表添加点击事件
+            document.getElementById('fundChart').on('plotly_click', function(data) {
+                if (data.points && data.points.length > 0) {
+                    const point = data.points[0];
+                    const clickedDate = point.x; // 获取点击的日期
+                    
+                    // 检查该日期是否在合并数据中（即是否有完整的PE数据）
+                    const mergedDateIndex = mergedData.findIndex(item => item.date === clickedDate);
+                    
+                    if (mergedDateIndex !== -1) {
+                        // 点击的日期有完整数据，直接运行回测
+                        const fundDataIndex = fundData.findIndex(item => item.date === clickedDate);
+                        if (fundDataIndex !== -1) {
+                            runBacktest(fundDataIndex);
+                        }
+                    } else {
+                        // 点击的日期没有完整回测数据，找最接近的后续日期
+                        const clickedTime = new Date(clickedDate).getTime();
+                        const validDate = mergedData.find(item => new Date(item.date).getTime() >= clickedTime);
+                        
+                        // 检查数据缺失的原因
+                        const fundHas = fundData.some(d => d.date === clickedDate);
+                        const indexHas = indexData.some(d => d.date === clickedDate);
+                        const peHas = peData.some(d => d.date === clickedDate);
+                        
+                        let reasonMessage = '';
+                        if (!indexHas) {
+                            reasonMessage = '（沪深300指数数据缺失）';
+                        } else if (!peHas) {
+                            reasonMessage = '（沪深300PE数据缺失）';
+                        } else {
+                            reasonMessage = '（数据不完整）';
+                        }
+                        
+                        if (validDate) {
+                            alert(`点击日期 ${clickedDate} 无法进行回测${reasonMessage}。\n已自动调整为 ${validDate.date}（最近的有效日期）。\n\n可用回测范围: ${mergedData[0].date} 至 ${mergedData[mergedData.length - 1].date}`);
+                            const fundDataIndex = fundData.findIndex(item => item.date === validDate.date);
+                            if (fundDataIndex !== -1) {
+                                runBacktest(fundDataIndex);
+                            }
+                        } else {
+                            alert(`无法进行回测${reasonMessage}。\n可用回测日期范围: ${mergedData[0].date} 至 ${mergedData[mergedData.length - 1].date}`);
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 计算分位数
+        function calculatePercentile(data, percentile) {
+            const sorted = [...data].sort((a, b) => a - b);
+            const index = (percentile / 100) * (sorted.length - 1);
+            if (Math.floor(index) === index) {
+                return sorted[index];
+            } else {
+                const lower = sorted[Math.floor(index)];
+                const upper = sorted[Math.ceil(index)];
+                return lower + (upper - lower) * (index - Math.floor(index));
+            }
+        }
+        
+        // 执行回测
+        function runBacktest(startDateIndex) {
+            // 显示加载指示器并禁用用户交互
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('backtestResults').style.display = 'none';
+            document.getElementById('fundChart').style.pointerEvents = 'none';
+            
+            // 获取用户设置的阈值和结束日期
+            const buyThreshold = parseFloat(document.getElementById('buyThreshold').value) || 20;
+            const sellThreshold = parseFloat(document.getElementById('sellThreshold').value) || 80;
+            const customEndDate = document.getElementById('endDatePicker').value;
+            
+            // 使用 setTimeout 确保 UI 更新
+            setTimeout(function() {
+                try {
+                    // 确保索引有效
+                    if (startDateIndex < 0 || startDateIndex >= fundData.length) {
+                        throw new Error('无效的起始日期索引');
+                    }
+                    
+                    // 获取点击的日期（从基金数据中获取）
+                    const clickedDate = fundData[startDateIndex].date;
+                    
+                    // 在合并数据中查找对应的索引
+                    const mergedDateIndex = mergedData.findIndex(item => item.date === clickedDate);
+                    
+                    if (mergedDateIndex === -1) {
+                        throw new Error(`无法在合并数据中找到点击日期 ${clickedDate}。请检查数据是否齐全。`);
+                    }
+                    
+                    // 获取起始日期和结束日期
+                    const startDate = clickedDate;
+                    const endDate = customEndDate || fundData[fundData.length - 1].date;
+                    
+                    // 执行回测逻辑
+                    const backtestResult = performBacktest(mergedDateIndex, buyThreshold, sellThreshold, endDate);
+                    
+                    // 存储交易详情供后续查看
+                    lastBacktestTradeDetails = backtestResult.tradeDetails;
+                    
+                    // 定义初始资本
+                    const initialCapital = 10000; // 本金10000元
+                    
+                    // 计算基金收益率
+                    const finalFundValue = backtestResult.finalValue;
+                    const fundReturn = ((finalFundValue - initialCapital) / initialCapital) * 100;
+                    
+                    // 计算指数收益率
+                    const startIndexFundValue = mergedData[mergedDateIndex].fundClose;
+                    const customEndIndex = mergedData.findIndex(item => item.date === endDate);
+                    const endIndexFundValue = customEndIndex !== -1 ? 
+                        mergedData[customEndIndex].fundClose : 
+                        mergedData[mergedData.length - 1].fundClose;
+                    const indexShares = initialCapital / startIndexFundValue;
+                    const indexFinalValue = indexShares * endIndexFundValue;
+                    const indexReturn = ((indexFinalValue - initialCapital) / initialCapital) * 100;
+                    
+                    // 计算超额收益
+                    const excessReturn = (fundReturn - indexReturn);
+                    
+                    // 更新结果面板
+                    document.getElementById('startDate').textContent = startDate;
+                    document.getElementById('endDate').textContent = endDate;
+                    document.getElementById('fundReturn').textContent = fundReturn.toFixed(2) + '%';
+                    document.getElementById('indexReturn').textContent = indexReturn.toFixed(2) + '%';
+                    document.getElementById('excessReturn').textContent = excessReturn.toFixed(2) + '%';
+                    
+                    // 设置颜色类
+                    document.getElementById('fundReturn').className = 'result-value ' + (fundReturn >= 0 ? 'positive' : 'negative');
+                    document.getElementById('indexReturn').className = 'result-value ' + (indexReturn >= 0 ? 'positive' : 'negative');
+                    document.getElementById('excessReturn').className = 'result-value ' + (excessReturn >= 0 ? 'positive' : 'negative');
+                    
+                    // 在基金图表上标注买卖点
+                    annotateBacktestPoints(backtestResult.buyPoints, backtestResult.sellPoints);
+                    
+                    // 隐藏加载指示器并显示结果
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                    document.getElementById('backtestResults').style.display = 'block';
+                    
+                    // 恢复用户交互
+                    document.getElementById('fundChart').style.pointerEvents = 'auto';
+                } catch (error) {
+                    console.error('回测执行失败:', error);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                    alert('回测执行失败: ' + error.message);
+                    
+                    // 恢复用户交互
+                    document.getElementById('fundChart').style.pointerEvents = 'auto';
+                }
+            }, 100);
+        }
+        
+        // 全局变量用于存储最近一次回测的交易详情
+        let lastBacktestTradeDetails = [];
+        
+        // 实际执行回测逻辑
+        function performBacktest(startDateIndex, buyThreshold = 20, sellThreshold = 80, endDate = null) {
+            const initialCapital = 10000; // 本金10000元
+            let capital = initialCapital;
+            let shares = 0;
+            let lastBuyPrice = 0;
+            let lastSellPrice = 0;
+            let buyMode = false;
+            let sellMode = false;
+            let buyCount = 0; // 买入次数计数器
+            
+            // 确定回测结束日期索引
+            let endIndex = mergedData.length - 1;
+            if (endDate) {
+                const customEndIndex = mergedData.findIndex(item => item.date === endDate);
+                console.log(`查找结束日期: endDate=${endDate}, customEndIndex=${customEndIndex}`);
+                if (customEndIndex !== -1) {
+                    endIndex = customEndIndex;
+                    console.log(`找到结束日期索引: ${endIndex}, 对应日期: ${mergedData[endIndex].date}`);
+                } else {
+                    // 如果指定的日期不存在，找到不超过该日期的最后一个日期
+                    const closestIndex = mergedData.findIndex(item => item.date > endDate);
+                    if (closestIndex !== -1 && closestIndex > 0) {
+                        endIndex = closestIndex - 1;
+                        console.log(`指定日期不存在，使用最近的日期索引: ${endIndex}, 对应日期: ${mergedData[endIndex].date}`);
+                    } else if (closestIndex === -1) {
+                        // 所有数据都不超过指定日期，使用最后一个数据
+                        endIndex = mergedData.length - 1;
+                        console.log(`指定日期之后无数据，使用最后日期索引: ${endIndex}, 对应日期: ${mergedData[endIndex].date}`);
+                    }
+                }
+            }
+            console.log(`最终回测范围: 从索引 ${startDateIndex}(${mergedData[startDateIndex].date}) 到 ${endIndex}(${mergedData[endIndex].date})`);
+            
+            // 存储买卖点和交易详情
+            const buyPoints = [];
+            const sellPoints = [];
+            const tradeDetails = []; // 存储交易详情
+            
+            // 使用预计算的PE分位点
+            const pePercentiles = mergedData.map(d => d.percentile);
+            
+            // 记录起始数据用于收益率计算
+            const startFundValue = mergedData[startDateIndex].fundClose;
+            
+            console.log(`开始回测: 起始日期索引=${startDateIndex}, 起始日期=${mergedData[startDateIndex].date}, 买入阈值=${buyThreshold}%, 卖出阈值=${sellThreshold}%`);
+            console.log(`起始数据: 基金净值=${startFundValue.toFixed(4)}`);
+            tradeDetails.push({
+                type: '开始',
+                date: mergedData[startDateIndex].date,
+                price: '-',
+                shares: shares,
+                capital: capital.toFixed(2),
+                description: `开始回测，初始资金: ${initialCapital.toFixed(2)}元，买入阈值: ${buyThreshold}%，卖出阈值: ${sellThreshold}%`
+            });
+            
+            // 每份金额为1000元（总本金的1/10）
+            const capitalPerShare = 1000;
+            
+            // 从起始日期开始回测，直到指定的结束日期
+            for (let i = startDateIndex; i <= endIndex; i++) {
+                const dayData = mergedData[i];
+                const fundValue = dayData.fundClose; // 使用正确的基金净值数据
+                const pePercentile = pePercentiles[i]; // 使用预计算的PE分位点
+                
+                // 计算当前基金的累计收益率
+                const currentFundReturn = ((fundValue - startFundValue) / startFundValue) * 100;
+                
+                // 检查是否进入买入模式 (PE分位点向下穿越buyThreshold%)
+                if (pePercentile && pePercentile < buyThreshold && !buyMode) {
+                    buyMode = true;
+                    sellMode = false;
+                    console.log(`买入模式开启: 日期=${dayData.date}, PE分位点=${pePercentile.toFixed(2)}%`);
+                    console.log(`  当前收益率: 基金=${currentFundReturn.toFixed(2)}%`);
+                    tradeDetails.push({
+                        type: '模式切换',
+                        date: dayData.date,
+                        price: '-',
+                        shares: shares,
+                        capital: capital.toFixed(2),
+                        description: `买入模式开启，PE分位点: ${pePercentile.toFixed(2)}%，阈值: ${buyThreshold}%`
+                    });
+                    
+                    // 初始买入1份（根据基金净值计算）
+                    if (capital >= fundValue) {
+                        const shareAmount = Math.min(Math.floor(capitalPerShare / fundValue), Math.floor(capital / fundValue));
+                        if (shareAmount > 0) {
+                            capital -= shareAmount * fundValue;
+                            shares += shareAmount;
+                            lastBuyPrice = fundValue;
+                            buyCount = 1; // 记录买入次数
+                            buyPoints.push({
+                                date: dayData.date,
+                                price: fundValue,
+                                shares: shares
+                            });
+                            console.log(`初始买入: 日期=${dayData.date}, 价格=${fundValue.toFixed(4)}, 份额=${shares}, 剩余资金=${capital.toFixed(2)}`);
+                            tradeDetails.push({
+                                type: '买入',
+                                date: dayData.date,
+                                price: fundValue.toFixed(4),
+                                shares: shareAmount,
+                                amount: (shareAmount * fundValue).toFixed(2),
+                                capital: capital.toFixed(2),
+                                description: `初始买入${shareAmount}份，价格: ${fundValue.toFixed(4)}`
+                            });
+                        }
+                    }
+                }
+                
+                // 检查是否进入卖出模式 (PE分位点向上穿越sellThreshold%)
+                if (pePercentile && pePercentile > sellThreshold && !sellMode) {
+                    sellMode = true;
+                    buyMode = false;
+                    lastSellPrice = fundValue; // 进入卖出模式时设置基准价格
+                    
+                    console.log(`卖出模式开启: 日期=${dayData.date}, PE分位点=${pePercentile.toFixed(2)}%`);
+                    tradeDetails.push({
+                        type: '模式切换',
+                        date: dayData.date,
+                        price: '-',
+                        shares: shares,
+                        capital: capital.toFixed(2),
+                        description: `卖出模式开启，PE分位点: ${pePercentile.toFixed(2)}%，阈值: ${sellThreshold}%，基准卖价: ${fundValue.toFixed(4)}`
+                    });
+                    
+                    // 立即进行第一次卖出
+                    if (shares > 0) {
+                        const sellShareAmount = Math.max(Math.floor(shares * 0.1), 1);
+                        if (sellShareAmount > 0) {
+                            capital += sellShareAmount * fundValue;
+                            shares -= sellShareAmount;
+                            
+                            sellPoints.push({
+                                date: dayData.date,
+                                price: fundValue,
+                                shares: shares
+                            });
+                            
+                            console.log(`初始卖出: 日期=${dayData.date}, 价格=${fundValue.toFixed(4)}, 份额=${sellShareAmount}, 剩余份额=${shares}`);
+                            tradeDetails.push({
+                                type: '卖出',
+                                date: dayData.date,
+                                price: fundValue.toFixed(4),
+                                shares: sellShareAmount,
+                                amount: (sellShareAmount * fundValue).toFixed(2),
+                                capital: capital.toFixed(2),
+                                description: `进入卖出模式，初始卖出${sellShareAmount}份，价格: ${fundValue.toFixed(4)}`
+                            });
+                        }
+                    }
+                }
+                
+                // 买入模式：每跌4%买入1份，最多10份
+                if (buyMode && buyCount < 10 && lastBuyPrice > 0) {
+                    const dropRatio = (lastBuyPrice - fundValue) / lastBuyPrice;
+                    
+                    if (dropRatio >= 0.04 && capital >= fundValue) {
+                        const shareAmount = Math.min(Math.floor(capitalPerShare / fundValue), Math.floor(capital / fundValue));
+                        
+                        if (shareAmount > 0) {
+                            capital -= shareAmount * fundValue;
+                            shares += shareAmount;
+                            lastBuyPrice = fundValue;
+                            buyCount++;
+                            buyPoints.push({
+                                date: dayData.date,
+                                price: fundValue,
+                                shares: shares
+                            });
+                            
+                            console.log(`补仓买入: 日期=${dayData.date}, 价格=${fundValue.toFixed(4)}, 份额=${shares}, 跌幅=${(dropRatio * 100).toFixed(2)}%, 剩余资金=${capital.toFixed(2)}`);
+                            tradeDetails.push({
+                                type: '买入',
+                                date: dayData.date,
+                                price: fundValue.toFixed(4),
+                                shares: shareAmount,
+                                amount: (shareAmount * fundValue).toFixed(2),
+                                capital: capital.toFixed(2),
+                                description: `补仓买入${shareAmount}份，价格: ${fundValue.toFixed(4)}，跌幅: ${(dropRatio * 100).toFixed(2)}%`
+                            });
+                        }
+                    }
+                }
+                
+                // 卖出模式：每涨4%卖出一份，最多10份
+                if (sellMode && shares > 0) {
+                    const riseRatio = (fundValue - lastSellPrice) / lastSellPrice;
+                    
+                    if (riseRatio >= 0.04) {
+                        const sellShareAmount = Math.max(Math.floor(shares * 0.1), 1);
+                        if (sellShareAmount > 0) {
+                            capital += sellShareAmount * fundValue;
+                            shares -= sellShareAmount;
+                            lastSellPrice = fundValue;
+                            
+                            sellPoints.push({
+                                date: dayData.date,
+                                price: fundValue,
+                                shares: shares
+                            });
+                            
+                            console.log(`卖出: 日期=${dayData.date}, 价格=${fundValue.toFixed(4)}, 份额=${sellShareAmount}, 涨幅=${(riseRatio * 100).toFixed(2)}%, 剩余份额=${shares}`);
+                            tradeDetails.push({
+                                type: '卖出',
+                                date: dayData.date,
+                                price: fundValue.toFixed(4),
+                                shares: sellShareAmount,
+                                amount: (sellShareAmount * fundValue).toFixed(2),
+                                capital: capital.toFixed(2),
+                                description: `卖出${sellShareAmount}份，价格: ${fundValue.toFixed(4)}，涨幅: ${(riseRatio * 100).toFixed(2)}%`
+                            });
+                        }
+                    }
+                }
+            }
+            
+            // 计算最终价值
+            const finalFundValue = mergedData[endIndex].fundClose;
+            const finalValue = capital + shares * finalFundValue;
+            const totalReturn = ((finalValue - initialCapital) / initialCapital) * 100;
+            
+            console.log(`回测结束: 最终价值=${finalValue.toFixed(2)}, 总收益率=${totalReturn.toFixed(2)}%, 持有份额=${shares}, 剩余资金=${capital.toFixed(2)}`);
+            
+            tradeDetails.push({
+                type: '结束',
+                date: mergedData[endIndex].date,
+                price: '-',
+                shares: shares,
+                capital: capital.toFixed(2),
+                description: `回测结束，最终价值: ${finalValue.toFixed(2)}元`
+            });
+            
+            return {
+                buyPoints,
+                sellPoints,
+                finalShares: shares,
+                finalValue: finalValue,
+                totalReturn: totalReturn,
+                tradeDetails: tradeDetails
+            };
+        }
+        
+        // 在基金图表上标注买卖点
+        function annotateBacktestPoints(buyPoints, sellPoints) {
+            // 移除之前添加的注释
+            const fundChartElement = document.getElementById('fundChart');
+            const existingAnnotations = fundChartElement.data.filter(trace => 
+                trace.name === '买入点' || trace.name === '卖出点'
+            );
+            
+            if (existingAnnotations.length > 0) {
+                Plotly.deleteTraces(fundChartElement, 
+                    fundChartElement.data.map((trace, index) => index).filter(index => 
+                        fundChartElement.data[index].name === '买入点' || 
+                        fundChartElement.data[index].name === '卖出点'
+                    )
+                );
+            }
+            
+            // 合并并排序所有交易点
+            const allPoints = [...buyPoints.map(p => ({...p, type: '买入'})), 
+                              ...sellPoints.map(p => ({...p, type: '卖出'}))]
+                              .sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // 添加买入点标记
+            if (buyPoints.length > 0) {
+                const buyTrace = {
+                    x: buyPoints.map(point => point.date),
+                    y: buyPoints.map(point => point.price),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: '买入点',
+                    marker: { 
+                        color: '#2ca02c',
+                        size: 10,
+                        symbol: 'triangle-up'
+                    },
+                    text: buyPoints.map((point, index) => {
+                        // 查找上次交易点
+                        const prevPoint = findPreviousPoint(allPoints, point.date);
+                        let changeInfo = '';
+                        if (prevPoint) {
+                            const changeRatio = ((point.price - prevPoint.price) / prevPoint.price) * 100;
+                            changeInfo = `<br>相对上次${prevPoint.type}: ${changeRatio.toFixed(2)}%`;
+                        }
+                        return `买入<br>时间: ${point.date}<br>价格: ${point.price.toFixed(4)}<br>份额: ${point.shares}${changeInfo}`;
+                    }),
+                    hovertemplate: '%{text}<extra></extra>'
+                };
+                
+                Plotly.addTraces(fundChartElement, buyTrace);
+            }
+            
+            // 添加卖出点标记
+            if (sellPoints.length > 0) {
+                const sellTrace = {
+                    x: sellPoints.map(point => point.date),
+                    y: sellPoints.map(point => point.price),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: '卖出点',
+                    marker: { 
+                        color: '#d62728',
+                        size: 10,
+                        symbol: 'triangle-down'
+                    },
+                    text: sellPoints.map((point, index) => {
+                        // 查找上次交易点
+                        const prevPoint = findPreviousPoint(allPoints, point.date);
+                        let changeInfo = '';
+                        if (prevPoint) {
+                            const changeRatio = ((point.price - prevPoint.price) / prevPoint.price) * 100;
+                            changeInfo = `<br>相对上次${prevPoint.type}: ${changeRatio.toFixed(2)}%`;
+                        }
+                        return `卖出<br>时间: ${point.date}<br>价格: ${point.price.toFixed(4)}<br>份额: ${point.shares}${changeInfo}`;
+                    }),
+                    hovertemplate: '%{text}<extra></extra>'
+                };
+                
+                Plotly.addTraces(fundChartElement, sellTrace);
+            }
+        }
+        
+        // 查找指定日期之前的最后一个交易点
+        function findPreviousPoint(allPoints, currentDate) {
+            const currentDateTime = new Date(currentDate).getTime();
+            // 过滤出早于当前日期的交易点
+            const earlierPoints = allPoints.filter(point => 
+                new Date(point.date).getTime() < currentDateTime
+            );
+            
+            // 返回最接近当前日期的交易点
+            if (earlierPoints.length > 0) {
+                return earlierPoints[earlierPoints.length - 1];
+            }
+            return null;
+        }
+        
+        // 隐藏回测结果
+        function hideBacktestResults() {
+            document.getElementById('backtestResults').style.display = 'none';
+            
+            // 移除买卖点标记
+            const fundChartElement = document.getElementById('fundChart');
+            const annotationIndices = [];
+            
+            // 查找需要删除的迹线索引
+            for (let i = 0; i < fundChartElement.data.length; i++) {
+                if (fundChartElement.data[i].name === '买入点' || 
+                    fundChartElement.data[i].name === '卖出点') {
+                    annotationIndices.push(i);
+                }
+            }
+            
+            // 逆序删除（避免索引变化影响）
+            annotationIndices.reverse().forEach(index => {
+                Plotly.deleteTraces(fundChartElement, index);
+            });
+        }
+        
+        // 显示交易详情
+        function showTradeDetails() {
+            const modal = document.getElementById('tradeDetailsModal');
+            const content = document.getElementById('tradeDetailsContent');
+            
+            // 创建表格展示交易详情
+            let tableHtml = `
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background-color: #f2f2f2;">
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">类型</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">日期</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">价格</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">份额</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">花费金额</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">剩余资金</th>
+                            <th style="border: 1px solid #ddd; padding: 8px; text-align: left;">描述</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            lastBacktestTradeDetails.forEach(detail => {
+                tableHtml += `
+                    <tr>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.type}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.date}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.price}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.shares}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.amount || '-'}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.capital}</td>
+                        <td style="border: 1px solid #ddd; padding: 8px;">${detail.description}</td>
+                    </tr>
+                `;
+            });
+            
+            tableHtml += `
+                    </tbody>
+                </table>
+            `;
+            
+            content.innerHTML = tableHtml;
+            modal.style.display = 'block';
+        }
+        
+        // 关闭交易详情
+        function closeTradeDetails() {
+            const modal = document.getElementById('tradeDetailsModal');
+            modal.style.display = 'none';
+        }
+        
+        // 点击模态框外部区域关闭模态框
+        window.onclick = function(event) {
+            const modal = document.getElementById('tradeDetailsModal');
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

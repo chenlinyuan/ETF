@@ -197,6 +197,32 @@
                     </div>
                 </div>
                 <div style="flex: 1; min-width: 250px;">
+                    <label for="buyPosition" style="display: block; margin-bottom: 10px; font-weight: bold;">
+                        买入仓位: <span id="buyPositionValue" style="color: #1976d2; font-size: 18px;">10</span>%
+                    </label>
+                    <input type="range" id="buyPosition" min="1" max="100" step="1" value="10" 
+                           style="width: 100%; height: 6px; border-radius: 3px; background: #ddd; outline: none; cursor: pointer;"
+                           oninput="updateBuyPositionDisplay()">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
+                        <span>1%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 250px;">
+                    <label for="sellPosition" style="display: block; margin-bottom: 10px; font-weight: bold;">
+                        卖出仓位: <span id="sellPositionValue" style="color: #ff7f0e; font-size: 18px;">10</span>%
+                    </label>
+                    <input type="range" id="sellPosition" min="1" max="100" step="1" value="10" 
+                           style="width: 100%; height: 6px; border-radius: 3px; background: #ddd; outline: none; cursor: pointer;"
+                           oninput="updateSellPositionDisplay()">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 5px;">
+                        <span>1%</span>
+                        <span>50%</span>
+                        <span>100%</span>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 250px;">
                     <label for="endDatePicker" style="display: block; margin-bottom: 10px; font-weight: bold;">回测结束日期：</label>
                     <input type="date" id="endDatePicker" style="padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 100%;">
                 </div>
@@ -228,7 +254,8 @@
                 </div>
             </div>
             <div style="margin-top: 15px;">
-                <button onclick="hideBacktestResults()">关闭结果</button>
+                <button onclick="rerunBacktest()" style="background-color: #ff9800;">重新回测</button>
+                <button onclick="hideBacktestResults()" style="margin-left: 10px;">关闭结果</button>
                 <button onclick="showTradeDetails()" style="margin-left: 10px;">查看投资详情</button>
             </div>
         </div>
@@ -286,6 +313,18 @@
         function updateSellThresholdDisplay() {
             const value = document.getElementById('sellThreshold').value;
             document.getElementById('sellThresholdValue').textContent = value;
+        }
+        
+        // 更新买入仓位显示
+        function updateBuyPositionDisplay() {
+            const value = document.getElementById('buyPosition').value;
+            document.getElementById('buyPositionValue').textContent = value;
+        }
+        
+        // 更新卖出仓位显示
+        function updateSellPositionDisplay() {
+            const value = document.getElementById('sellPosition').value;
+            document.getElementById('sellPositionValue').textContent = value;
         }
         
         // 获取所有可用的数据类型文件夹
@@ -666,9 +705,11 @@
             document.getElementById('backtestResults').style.display = 'none';
             document.getElementById('fundChart').style.pointerEvents = 'none';
             
-            // 获取用户设置的阈值和结束日期
+            // 获取用户设置的阈值、仓位和结束日期
             const buyThreshold = parseFloat(document.getElementById('buyThreshold').value) || 20;
             const sellThreshold = parseFloat(document.getElementById('sellThreshold').value) || 80;
+            const buyPosition = parseFloat(document.getElementById('buyPosition').value) / 100 || 0.1;
+            const sellPosition = parseFloat(document.getElementById('sellPosition').value) / 100 || 0.1;
             const customEndDate = document.getElementById('endDatePicker').value;
             
             // 使用 setTimeout 确保 UI 更新
@@ -693,11 +734,22 @@
                     const startDate = clickedDate;
                     const endDate = customEndDate || fundData[fundData.length - 1].date;
                     
-                    // 执行回测逻辑
-                    const backtestResult = performBacktest(mergedDateIndex, buyThreshold, sellThreshold, endDate);
+                    // 调试日志：显示数据范围
+                    console.log(`\n===== 数据范围诊断 =====`);
+                    console.log(`fundData 日期范围: ${fundData[0].date} ~ ${fundData[fundData.length - 1].date}`);
+                    console.log(`mergedData 日期范围: ${mergedData[0].date} ~ ${mergedData[mergedData.length - 1].date}`);
+                    console.log(`用户设置的结束日期: ${customEndDate}`);
+                    console.log(`实际使用的结束日期: ${endDate}`);
+                    console.log(`mergedData 中前5条日期:`, mergedData.slice(0, 5).map(d => d.date));
+                    console.log(`mergedData 中后5条日期:`, mergedData.slice(-5).map(d => d.date));
+                    console.log(`====================\n`);
                     
-                    // 存储交易详情供后续查看
+                    // 执行回测逻辑，传递买卖仓位参数
+                    const backtestResult = performBacktest(mergedDateIndex, buyThreshold, sellThreshold, endDate, buyPosition, sellPosition);
+                    
+                    // 存储交易详情和起始日期索引供后续查看和重新回测
                     lastBacktestTradeDetails = backtestResult.tradeDetails;
+                    lastBacktestStartDateIndex = startDateIndex;
                     
                     // 定义初始资本
                     const initialCapital = 10000; // 本金10000元
@@ -708,13 +760,41 @@
                     
                     // 计算指数收益率
                     const startIndexFundValue = mergedData[mergedDateIndex].fundClose;
-                    const customEndIndex = mergedData.findIndex(item => item.date === endDate);
-                    const endIndexFundValue = customEndIndex !== -1 ? 
-                        mergedData[customEndIndex].fundClose : 
-                        mergedData[mergedData.length - 1].fundClose;
+                    // 使用相同的逻辑查找结束日期，与performBacktest保持一致
+                    let endIndex = mergedData.length - 1;
+                    if (endDate) {
+                        const customEndIndex = mergedData.findIndex(item => item.date === endDate);
+                        if (customEndIndex !== -1) {
+                            endIndex = customEndIndex;
+                        } else {
+                            // 如果指定的日期不存在，找到不超过该日期的最后一个日期
+                            const closestIndex = mergedData.findIndex(item => item.date > endDate);
+                            if (closestIndex !== -1 && closestIndex > 0) {
+                                endIndex = closestIndex - 1;
+                            } else if (closestIndex === -1) {
+                                // 所有数据都不超过指定日期，使用最后一个数据
+                                endIndex = mergedData.length - 1;
+                            }
+                        }
+                    }
+                    const endIndexFundValue = mergedData[endIndex].fundClose;
                     const indexShares = initialCapital / startIndexFundValue;
                     const indexFinalValue = indexShares * endIndexFundValue;
                     const indexReturn = ((indexFinalValue - initialCapital) / initialCapital) * 100;
+                    
+                    // 详细打印指数收益率计算过程
+                    console.log(`\n===== 指数收益率计算详情 =====`);
+                    console.log(`起始日期: ${startDate}`);
+                    console.log(`起始基金净值: ${startIndexFundValue.toFixed(4)}元`);
+                    console.log(`结束日期（设置的日期）: ${endDate}`);
+                    console.log(`实际使用的结束日期: ${mergedData[endIndex].date}`);
+                    console.log(`结束基金净值: ${endIndexFundValue.toFixed(4)}元`);
+                    console.log(`初始资金: ${initialCapital}元`);
+                    console.log(`购买份额: ${indexShares.toFixed(4)}份（${initialCapital} ÷ ${startIndexFundValue.toFixed(4)}）`);
+                    console.log(`最终价值: ${indexFinalValue.toFixed(2)}元（${indexShares.toFixed(4)} × ${endIndexFundValue.toFixed(4)}）`);
+                    console.log(`指数收益: ${(indexFinalValue - initialCapital).toFixed(2)}元`);
+                    console.log(`指数收益率: ${indexReturn.toFixed(2)}%（(${indexFinalValue.toFixed(2)} - ${initialCapital}) / ${initialCapital} × 100）`);
+                    console.log(`=============================\n`);
                     
                     // 计算超额收益
                     const excessReturn = (fundReturn - indexReturn);
@@ -753,9 +833,9 @@
         
         // 全局变量用于存储最近一次回测的交易详情
         let lastBacktestTradeDetails = [];
-        
+        let lastBacktestStartDateIndex = -1; // 保存最后一次回测的起始日期索引
         // 实际执行回测逻辑
-        function performBacktest(startDateIndex, buyThreshold = 20, sellThreshold = 80, endDate = null) {
+        function performBacktest(startDateIndex, buyThreshold = 20, sellThreshold = 80, endDate = null, buyPosition = 0.1, sellPosition = 0.1) {
             const initialCapital = 10000; // 本金10000元
             let capital = initialCapital;
             let shares = 0;
@@ -810,8 +890,8 @@
                 description: `开始回测，初始资金: ${initialCapital.toFixed(2)}元，买入阈值: ${buyThreshold}%，卖出阈值: ${sellThreshold}%`
             });
             
-            // 每份金额为1000元（总本金的1/10）
-            const capitalPerShare = 1000;
+            // 每次买入金额根据buyPosition参数计算
+            const capitalPerShare = initialCapital * buyPosition;
             
             // 从起始日期开始回测，直到指定的结束日期
             for (let i = startDateIndex; i <= endIndex; i++) {
@@ -855,7 +935,7 @@
                                 type: '买入',
                                 date: dayData.date,
                                 price: fundValue.toFixed(4),
-                                shares: shareAmount,
+                                shares: shares,
                                 amount: (shareAmount * fundValue).toFixed(2),
                                 capital: capital.toFixed(2),
                                 description: `初始买入${shareAmount}份，价格: ${fundValue.toFixed(4)}`
@@ -882,7 +962,7 @@
                     
                     // 立即进行第一次卖出
                     if (shares > 0) {
-                        const sellShareAmount = Math.max(Math.floor(shares * 0.1), 1);
+                        const sellShareAmount = Math.max(Math.floor(shares * sellPosition), 1);
                         if (sellShareAmount > 0) {
                             capital += sellShareAmount * fundValue;
                             shares -= sellShareAmount;
@@ -898,7 +978,7 @@
                                 type: '卖出',
                                 date: dayData.date,
                                 price: fundValue.toFixed(4),
-                                shares: sellShareAmount,
+                                shares: shares,
                                 amount: (sellShareAmount * fundValue).toFixed(2),
                                 capital: capital.toFixed(2),
                                 description: `进入卖出模式，初始卖出${sellShareAmount}份，价格: ${fundValue.toFixed(4)}`
@@ -930,7 +1010,7 @@
                                 type: '买入',
                                 date: dayData.date,
                                 price: fundValue.toFixed(4),
-                                shares: shareAmount,
+                                shares: shares,
                                 amount: (shareAmount * fundValue).toFixed(2),
                                 capital: capital.toFixed(2),
                                 description: `补仓买入${shareAmount}份，价格: ${fundValue.toFixed(4)}，跌幅: ${(dropRatio * 100).toFixed(2)}%`
@@ -944,7 +1024,7 @@
                     const riseRatio = (fundValue - lastSellPrice) / lastSellPrice;
                     
                     if (riseRatio >= 0.04) {
-                        const sellShareAmount = Math.max(Math.floor(shares * 0.1), 1);
+                        const sellShareAmount = Math.max(Math.floor(shares * sellPosition), 1);
                         if (sellShareAmount > 0) {
                             capital += sellShareAmount * fundValue;
                             shares -= sellShareAmount;
@@ -961,7 +1041,7 @@
                                 type: '卖出',
                                 date: dayData.date,
                                 price: fundValue.toFixed(4),
-                                shares: sellShareAmount,
+                                shares: shares,
                                 amount: (sellShareAmount * fundValue).toFixed(2),
                                 capital: capital.toFixed(2),
                                 description: `卖出${sellShareAmount}份，价格: ${fundValue.toFixed(4)}，涨幅: ${(riseRatio * 100).toFixed(2)}%`
@@ -1091,6 +1171,15 @@
                 return earlierPoints[earlierPoints.length - 1];
             }
             return null;
+        }
+        
+        // 重新回测
+        function rerunBacktest() {
+            if (lastBacktestStartDateIndex === -1) {
+                alert('未找到上一次回测的起始日期，请先进行一次回测');
+                return;
+            }
+            runBacktest(lastBacktestStartDateIndex);
         }
         
         // 隐藏回测结果
